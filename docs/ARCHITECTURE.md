@@ -36,11 +36,12 @@ It is responsible for:
 - Mounting PixiJS into a React page.
 - Translating pointer coordinates between screen and canvas world space.
 - Creating and updating Yjs objects.
-- Scoping board documents with an optional share-link access key.
+- Scoping board documents with server-authorized account membership.
 - Persisting the Yjs document locally with IndexedDB.
 - Rendering remote cursor awareness.
 - Reconstructing replay state from logged Yjs updates.
 - Running Matter.js only for locally owned physics objects.
+- Sending authenticated board and error-report API requests.
 
 ## Canvas Rendering
 
@@ -101,21 +102,25 @@ Board metadata:
 - `seededDemoAt`
 - `updatedAt`
 
-## Share-Link Access Keys
+## Authentication And Board ACLs
 
-Newly created boards use URLs like:
+Accounts, boards, and memberships are stored in `SYNC_DATA_DIR/security.json` with restrictive file
+permissions. Passwords are salted scrypt hashes. The web app stores a short-lived signed session token
+locally and sends it as a Bearer token for HTTP APIs and as the Hocuspocus provider token for WebSocket
+authentication.
+
+Boards use URLs like:
 
 ```txt
-/boards/:boardId?key=:secret
+/boards/:boardId
 ```
 
-The frontend derives the Hocuspocus/Yjs document name from both values:
+`onAuthenticate` verifies the session and board membership before a document is opened. It marks viewer
+connections read-only at the Hocuspocus connection layer; owners and editors may write. Replay is guarded
+by the same ACL. URLs are identifiers only and never grant access.
 
-```txt
-boardId__secret
-```
-
-This means someone with only `/boards/:boardId` does not connect to the same synced document. It is a practical hackathon-grade access boundary for share links. It is not a replacement for production authentication, because the sync server still needs `onAuthenticate` before public launch.
+Object locks are persisted collaboration hints, used by the UI to prevent accidental edits by another
+member. They are not presented as a substitute for board-level authorization.
 
 React state is used for local UI only: selected tool, selected object, camera, editor state, replay panel state, and temporary UI feedback.
 
@@ -235,10 +240,9 @@ The architecture is compact enough to build quickly, but strong enough to demons
 
 Before a real public launch:
 
-- Add authentication to the web app.
-- Add Hocuspocus `onAuthenticate`.
-- Add board permissions.
-- Move storage from filesystem to durable object/blob/database storage if needed.
-- Add rate limiting to HTTP endpoints.
-- Add backup/export for board data.
-- Add monitoring around sync connections and replay storage.
+- Set a unique, long `SYNC_AUTH_SECRET` and do not use the local fallback.
+- Restrict `SYNC_ALLOWED_ORIGINS` to the deployed web origin.
+- Back up `SYNC_BACKUP_DIR` off-host; the service writes latest snapshots there.
+- Protect `/metrics` with `SYNC_METRICS_KEY`; monitor errors, requests, denials, and replay compactions.
+- Replay logs are retained and capped with `SYNC_REPLAY_RETENTION_DAYS` and `SYNC_REPLAY_MAX_ENTRIES`.
+- Add password reset/email verification and durable database/object storage as the user base grows.

@@ -27,6 +27,8 @@ export type BaseCanvasObject = {
   id: string;
   createdBy: string;
   updatedAt: number;
+  /** A user-facing object lock. Board ACL remains the server-enforced boundary. */
+  lockedBy?: string;
   physics?: PhysicsState;
 };
 

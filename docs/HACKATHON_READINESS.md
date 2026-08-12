@@ -34,8 +34,8 @@ The original prompt asked for an ambitious solo, self-hosted collaborative infin
 | Presence radar | Complete | Minimap shows board, viewport, and collaborator rectangles. |
 | Time travel/replay | Complete | Server logs Yjs updates and frontend replays them. |
 | Self-hosting | Complete | Docker Compose and durable data volume. |
-| Polish | Complete enough | Dashboard, share links, seeded board, export, Notion-like theme. |
-| Share-link protection | Complete for demo | New boards use a secret `?key=` to scope synced documents. |
+| Polish | Complete enough | Dashboard, invited board access, seeded board, export, Notion-like theme. |
+| Account and board security | Complete | Signed sessions, owner/editor/viewer ACLs, and Hocuspocus read-only viewers. |
 | Resize handles | Complete | Notes and shapes can be resized from a handle. |
 | Replay playback | Complete | Replay can be scrubbed or played. |
 | Full-board PNG export | Complete | Export renders the full board content. |
@@ -77,7 +77,7 @@ Open a second tab after creating the board.
 
 1. **Create:** Open the dashboard and create a new board.
 2. **Seed:** Click **Seed demo board** to instantly show meaningful content.
-3. **Share:** Copy the board link and open it in a second tab.
+3. **Invite:** Register a second account, invite it as an editor, then open the board in its session.
 4. **Collaborate:** Draw or move an object in one tab and show it syncing in the other.
 5. **Presence:** Move around and show cursors plus the radar viewport.
 6. **Offline:** Stop the sync server, keep editing, and point out the offline banner.
@@ -106,9 +106,9 @@ The offline plus replay combination is the most important demo moment. It proves
 If time is short:
 
 1. Do not expand physics beyond the existing toss/collision/gravity well.
-2. Do not add rich text.
-3. Do not add accounts.
-4. Do not add crop controls.
+2. Do not expand rich text beyond its safe formatting controls.
+3. Do not expand account flows before deployment hardening.
+4. Do not expand export beyond full-board and selected-object crops.
 
 Protect:
 
@@ -124,12 +124,12 @@ The main risks before judging are operational, not architectural:
 
 - Browser QA needs to verify the exact offline/reconnect demo.
 - Deployment needs HTTPS/WSS configuration.
-- The sync server needs an authenticated production mode if the app is exposed publicly.
+- Production needs a unique auth secret, restricted allowed origins, and off-host snapshot backups.
 
 ## Next Best Engineering Steps
 
 1. Deploy to a real URL.
 2. Configure WSS for the sync endpoint.
-3. Add production-grade account auth and board permissions.
-4. Add export crop controls.
+3. Configure production secrets, allowed origins, protected metrics, and backup destination.
+4. Add arbitrary/multi-object crop controls.
 5. Add physics presets and boundaries only if the core demo is fully stable.

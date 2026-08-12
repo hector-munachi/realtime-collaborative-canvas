@@ -6,6 +6,13 @@ services:
     environment:
       SYNC_PORT: 1234
       SYNC_DATA_DIR: /app/data
+      SYNC_BACKUP_DIR: /app/data/backups
+      SYNC_AUTH_SECRET: ${SYNC_AUTH_SECRET:-local-development-secret-change-before-production}
+      SYNC_ALLOWED_ORIGINS: ${SYNC_ALLOWED_ORIGINS:-http://localhost:3000}
+      SYNC_REPLAY_RETENTION_DAYS: ${SYNC_REPLAY_RETENTION_DAYS:-30}
+      SYNC_REPLAY_MAX_ENTRIES: ${SYNC_REPLAY_MAX_ENTRIES:-20000}
+      SYNC_RATE_LIMIT_PER_MINUTE: ${SYNC_RATE_LIMIT_PER_MINUTE:-120}
+      SYNC_METRICS_KEY: ${SYNC_METRICS_KEY:-}
     ports:
       - "1234:1234"
     volumes:

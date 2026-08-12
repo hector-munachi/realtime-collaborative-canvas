@@ -19,6 +19,7 @@ import {
   RectangleHorizontal,
   RotateCcw,
   Share2,
+  ShieldCheck,
   Sparkles,
   StickyNote,
   Trash2,
@@ -44,7 +45,8 @@ import {
   type Point,
   type ReplayUpdate
 } from "@icanvas/shared";
-import { boardHref, boardTitleFromId, getStoredBoardAccessKey, rememberBoard } from "../../lib/boards";
+import { boardHref, boardTitleFromId, rememberBoard } from "../../lib/boards";
+import { api, getSession } from "../../lib/auth";
 import { objectsAtReplayIndex } from "../../lib/replay";
 import { cn } from "../../lib/utils";
 import { getLocalUser, type LocalUser } from "../../lib/user";
@@ -83,6 +85,10 @@ type DragState =
     };
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
+type SecureBoard = {
+  ownerId: string;
+  members: Array<{ userId: string; role: "owner" | "editor" | "viewer" }>;
+};
 
 const SYNC_URL = process.env.NEXT_PUBLIC_SYNC_URL ?? "ws://localhost:1234";
 const SYNC_HTTP_URL = process.env.NEXT_PUBLIC_SYNC_HTTP_URL ?? "http://localhost:1234";
@@ -274,12 +280,28 @@ function boardBounds(objects: CanvasObject[], camera: Camera, viewportWidth: num
   };
 }
 
-function boardDocumentName(boardId: string, accessKey?: string) {
-  return accessKey ? `${boardId}__${accessKey}` : boardId;
+function boardDocumentName(boardId: string) {
+  return boardId;
 }
 
 function slugify(input: string) {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "icanvas-board";
+}
+
+function plainText(value: string) {
+  if (typeof window === "undefined") return value.replace(/<[^>]+>/g, "");
+  const documentValue = new DOMParser().parseFromString(value, "text/html");
+  return documentValue.body.textContent ?? "";
+}
+
+function sanitizeRichText(value: string) {
+  const documentValue = new DOMParser().parseFromString(value, "text/html");
+  const allowed = new Set(["B", "STRONG", "I", "EM", "U", "BR", "DIV", "P"]);
+  for (const element of Array.from(documentValue.body.querySelectorAll("*"))) {
+    if (!allowed.has(element.tagName)) element.replaceWith(documentValue.createTextNode(element.textContent ?? ""));
+    else Array.from(element.attributes).forEach((attribute) => element.removeAttribute(attribute.name));
+  }
+  return documentValue.body.innerHTML.trim() || "Untitled note";
 }
 
 function wrapCanvasText(
@@ -429,7 +451,7 @@ function exportObjectsToPng(objects: CanvasObject[], title: string) {
       context.font = `${16 * scale}px Inter, Arial, sans-serif`;
       wrapCanvasText(
         context,
-        object.text,
+        plainText(object.text),
         topLeft.x + 12 * scale,
         topLeft.y + 28 * scale,
         width - 24 * scale,
@@ -623,7 +645,7 @@ function drawObjects(
       });
 
       const label = new Text({
-        text: object.text,
+        text: plainText(object.text),
         style: {
           fontFamily: "Inter, system-ui, sans-serif",
           fontSize: 16,
@@ -704,23 +726,18 @@ export function CanvasWorkspace({
   const [boardMeta, setBoardMeta] = useState<BoardMetadata>({});
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [accessKey] = useState(() => {
-    if (initialAccessKey) {
-      return initialAccessKey;
-    }
-
-    if (typeof window !== "undefined") {
-      return getStoredBoardAccessKey(boardId) ?? "";
-    }
-
-    return "";
-  });
+  const [sessionToken] = useState(() => getSession()?.token ?? "");
+  const [currentAccount] = useState(() => getSession()?.user ?? null);
+  const [secureBoard, setSecureBoard] = useState<SecureBoard | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"editor" | "viewer">("editor");
+  const [inviteError, setInviteError] = useState("");
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [physicsMode, setPhysicsMode] = useState(false);
 
   const fallbackBoardTitle = useMemo(() => boardTitleFromId(boardId), [boardId]);
   const boardTitle = boardMeta.title?.trim() || fallbackBoardTitle;
-  const documentName = useMemo(() => boardDocumentName(boardId, accessKey), [accessKey, boardId]);
+  const documentName = useMemo(() => boardDocumentName(boardId), [boardId]);
 
   const renderedObjects = useMemo(() => {
     if (replayIndex === null || replayUpdates.length === 0) {
@@ -810,8 +827,14 @@ export function CanvasWorkspace({
   }, [camera, renderedObjects]);
 
   useEffect(() => {
-    rememberBoard(boardId, boardTitle, accessKey || undefined);
-  }, [accessKey, boardId, boardTitle]);
+    rememberBoard(boardId, boardTitle);
+  }, [boardId, boardTitle]);
+
+  useEffect(() => {
+    void api<{ board: SecureBoard }>(`/api/boards/${encodeURIComponent(boardId)}`)
+      .then((result) => setSecureBoard(result.board))
+      .catch(() => setSecureBoard(null));
+  }, [boardId]);
 
   useEffect(() => {
     setTitleDraft(boardTitle);
@@ -865,7 +888,11 @@ export function CanvasWorkspace({
   }, [camera, publishViewport]);
 
   useEffect(() => {
-    const user = getLocalUser();
+    const storedUser = getLocalUser();
+    const account = getSession()?.user;
+    const user: LocalUser = account
+      ? { id: account.id, name: account.name, color: storedUser.color }
+      : storedUser;
     localUserRef.current = user;
 
     const ydoc = new Y.Doc();
@@ -901,6 +928,7 @@ export function CanvasWorkspace({
       url: SYNC_URL,
       name: documentName,
       document: ydoc,
+      token: sessionToken,
       onStatus: ({ status }) => {
         setConnection(status === "connected" ? "connected" : "disconnected");
       }
@@ -952,7 +980,7 @@ export function CanvasWorkspace({
       physicsOwnerRef.current = null;
       ydoc.destroy();
     };
-  }, [documentName]);
+  }, [documentName, sessionToken]);
 
   useEffect(() => {
     let disposed = false;
@@ -1042,8 +1070,18 @@ export function CanvasWorkspace({
   }, [replayOpen, replayPlaying, replayUpdates.length]);
 
   const upsertObject = useCallback((object: CanvasObject) => {
+    const existing = objectsMapRef.current?.get(object.id);
+    if (existing?.lockedBy && existing.lockedBy !== localUserRef.current?.id) return;
     objectsMapRef.current?.set(object.id, object);
   }, []);
+
+  const toggleObjectLock = useCallback(() => {
+    if (!selectedId) return;
+    const object = objectsMapRef.current?.get(selectedId);
+    const userId = localUserRef.current?.id;
+    if (!object || !userId || (object.lockedBy && object.lockedBy !== userId)) return;
+    upsertObject({ ...object, lockedBy: object.lockedBy ? undefined : userId, updatedAt: Date.now() });
+  }, [selectedId, upsertObject]);
 
   useEffect(() => {
     if (!physicsMode || replayIndex !== null) {
@@ -1279,7 +1317,7 @@ export function CanvasWorkspace({
     if (object?.type === "note") {
       upsertObject({
         ...object,
-        text: editingNote.text.trim() || "Untitled note",
+        text: sanitizeRichText(editingNote.text),
         updatedAt: Date.now()
       });
     }
@@ -1290,23 +1328,37 @@ export function CanvasWorkspace({
   const copyShareLink = useCallback(async () => {
     const href =
       typeof window === "undefined"
-        ? boardHref(boardId, accessKey || undefined)
-        : `${window.location.origin}${boardHref(boardId, accessKey || undefined)}`;
+        ? boardHref(boardId)
+        : `${window.location.origin}${boardHref(boardId)}`;
 
     await navigator.clipboard.writeText(href);
     setShareCopied(true);
     window.setTimeout(() => {
       setShareCopied(false);
     }, 1800);
-  }, [accessKey, boardId]);
+  }, [boardId]);
+
+  const inviteMember = useCallback(async () => {
+    setInviteError("");
+    try {
+      const result = await api<{ board: SecureBoard }>(`/api/boards/${encodeURIComponent(boardId)}/members`, {
+        method: "POST",
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole })
+      });
+      setSecureBoard(result.board);
+      setInviteEmail("");
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : "Could not update access.");
+    }
+  }, [boardId, inviteEmail, inviteRole]);
 
   const commitTitle = useCallback(() => {
     const title = titleDraft.trim() || fallbackBoardTitle;
     metaMapRef.current?.set("title", title);
     metaMapRef.current?.set("updatedAt", Date.now());
-    rememberBoard(boardId, title, accessKey || undefined);
+    rememberBoard(boardId, title);
     setIsEditingTitle(false);
-  }, [accessKey, boardId, fallbackBoardTitle, titleDraft]);
+  }, [boardId, fallbackBoardTitle, titleDraft]);
 
   const seedDemoBoard = useCallback(() => {
     const user = localUserRef.current;
@@ -1389,6 +1441,13 @@ export function CanvasWorkspace({
       setExportCopied(false);
     }, 1800);
   }, [boardTitle, objects]);
+
+  const exportSelectedPng = useCallback(() => {
+    if (!selectedObject) return;
+    exportObjectsToPng([selectedObject], `${boardTitle}-${selectedObject.type}`);
+    setExportCopied(true);
+    window.setTimeout(() => setExportCopied(false), 1800);
+  }, [boardTitle, selectedObject]);
 
   const jumpMinimap = useCallback(
     (event: React.MouseEvent<SVGSVGElement>) => {
@@ -1718,13 +1777,7 @@ export function CanvasWorkspace({
   );
 
   const loadReplay = useCallback(async () => {
-    const response = await fetch(`${SYNC_HTTP_URL}/api/boards/${encodeURIComponent(documentName)}/replay`);
-
-    if (!response.ok) {
-      throw new Error("Replay log is not available yet.");
-    }
-
-    const payload = (await response.json()) as { updates: ReplayUpdate[] };
+    const payload = await api<{ updates: ReplayUpdate[] }>(`/api/boards/${encodeURIComponent(documentName)}/replay`);
     setReplayUpdates(payload.updates);
     setReplayIndex(payload.updates.length > 0 ? 0 : null);
     setReplayPlaying(false);
@@ -1821,8 +1874,8 @@ export function CanvasWorkspace({
             <Radio className="h-3.5 w-3.5" />
             {offlineReady ? "offline ready" : "local cache"}
           </Badge>
-          <Badge variant={accessKey ? "success" : "muted"} className="hidden gap-1.5 xl:inline-flex">
-            {accessKey ? "keyed link" : "public demo"}
+          <Badge variant="success" className="hidden gap-1.5 xl:inline-flex">
+            private board
           </Badge>
           <Button variant="outline" size="sm" type="button" onClick={copyShareLink}>
             {shareCopied ? <Clipboard className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
@@ -1875,7 +1928,7 @@ export function CanvasWorkspace({
           </div>
 
           <div
-            className="absolute left-4 top-4 z-10 flex rounded-lg border bg-card p-1 shadow-sm md:hidden"
+            className="absolute left-2 right-2 top-2 z-10 flex max-w-[calc(100%-16px)] overflow-x-auto rounded-lg border bg-card p-1 shadow-sm md:hidden"
             onPointerDown={(event) => event.stopPropagation()}
           >
             {TOOL_CONFIG.map((item) => {
@@ -1941,36 +1994,36 @@ export function CanvasWorkspace({
           ) : null}
 
           {selectedNotePosition ? (
-            <textarea
-              className="absolute z-20 resize-none rounded-md border border-[#d6c06d] bg-[#fbf3db] p-3 text-sm leading-6 text-[#1f1f1f] caret-[#1f1f1f] shadow-lg outline-none ring-2 ring-ring placeholder:text-[#787774]"
+            <div
+              className="absolute z-20 rounded-md border border-[#d6c06d] bg-[#fbf3db] text-sm leading-6 text-[#1f1f1f] shadow-lg outline-none ring-2 ring-ring"
               style={{
                 left: selectedNotePosition.left,
                 top: selectedNotePosition.top,
                 width: Math.max(180, selectedNotePosition.width),
                 height: Math.max(110, selectedNotePosition.height)
               }}
-              value={editingNote?.text ?? ""}
-              autoFocus
               onPointerDown={(event) => event.stopPropagation()}
               onDoubleClick={(event) => event.stopPropagation()}
-              onChange={(event) => {
-                const nextText = event.currentTarget.value;
-
-                setEditingNote((current) =>
-                  current ? { ...current, text: nextText } : current
-                );
-              }}
-              onBlur={commitEditingNote}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                  commitEditingNote();
-                }
-
-                if (event.key === "Escape") {
-                  setEditingNote(null);
-                }
-              }}
-            />
+            >
+              <div className="flex gap-1 border-b border-[#d6c06d] bg-[#f8edc8] p-1">
+                <button type="button" className="rounded px-2 py-0.5 text-xs font-bold hover:bg-white/60" onMouseDown={(event) => { event.preventDefault(); document.execCommand("bold"); }}>B</button>
+                <button type="button" className="rounded px-2 py-0.5 text-xs italic hover:bg-white/60" onMouseDown={(event) => { event.preventDefault(); document.execCommand("italic"); }}>I</button>
+                <button type="button" className="rounded px-2 py-0.5 text-xs underline hover:bg-white/60" onMouseDown={(event) => { event.preventDefault(); document.execCommand("underline"); }}>U</button>
+              </div>
+              <div
+                className="h-[calc(100%-34px)] overflow-auto p-3 outline-none"
+                contentEditable
+                suppressContentEditableWarning
+                autoFocus
+                dangerouslySetInnerHTML={{ __html: editingNote?.text ?? "" }}
+                onInput={(event) => setEditingNote((current) => current ? { ...current, text: event.currentTarget.innerHTML } : current)}
+                onBlur={commitEditingNote}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") commitEditingNote();
+                  if (event.key === "Escape") setEditingNote(null);
+                }}
+              />
+            </div>
           ) : null}
 
           {selectedBoxPosition ? (
@@ -2277,6 +2330,16 @@ export function CanvasWorkspace({
                   variant="outline"
                   className="justify-start"
                   type="button"
+                  disabled={!selectedObject}
+                  onClick={exportSelectedPng}
+                >
+                  <Download className="h-4 w-4" />
+                  Export selected PNG
+                </Button>
+                <Button
+                  variant="outline"
+                  className="justify-start"
+                  type="button"
                   disabled={!selectedId || replayIndex !== null}
                   onClick={deleteSelected}
                 >
@@ -2284,6 +2347,24 @@ export function CanvasWorkspace({
                   Delete selected
                 </Button>
               </div>
+            </section>
+
+            <section>
+              <h2 className="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+                <Share2 className="h-3.5 w-3.5" />
+                Board access
+              </h2>
+              <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                Copying the link alone does not grant access. The owner must invite an iCanvas account.
+              </p>
+              {secureBoard?.ownerId === currentAccount?.id ? (
+                <div className="mt-3 grid gap-2">
+                  <input className="rounded-md border bg-background px-2 py-1.5 text-xs" type="email" placeholder="Teammate email" value={inviteEmail} onChange={(event) => setInviteEmail(event.currentTarget.value)} />
+                  <select className="rounded-md border bg-background px-2 py-1.5 text-xs" value={inviteRole} onChange={(event) => setInviteRole(event.currentTarget.value as "editor" | "viewer")}><option value="editor">Editor</option><option value="viewer">Viewer</option></select>
+                  <Button variant="outline" size="sm" type="button" disabled={!inviteEmail} onClick={() => void inviteMember()}>Invite member</Button>
+                  {inviteError ? <p className="text-xs text-destructive">{inviteError}</p> : null}
+                </div>
+              ) : <p className="mt-2 text-xs text-muted-foreground">{secureBoard ? "Your board role is managed by the owner." : "Checking board permissions…"}</p>}
             </section>
 
             <section>
@@ -2315,7 +2396,9 @@ export function CanvasWorkspace({
                 <Palette className="h-3.5 w-3.5" />
                 Style
               </h2>
-              {selectedObject?.type === "gravity-well" ? (
+              {selectedObject?.lockedBy && selectedObject.lockedBy !== currentAccount?.id ? (
+                <div className="mt-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">This object is locked by its owner.</div>
+              ) : selectedObject?.type === "gravity-well" ? (
                 <div className="mt-3 grid gap-3">
                   <p className="text-sm leading-6 text-muted-foreground">
                     {selectedObject.strength >= 0 ? "Attracting" : "Repelling"} physics objects within
@@ -2414,6 +2497,10 @@ export function CanvasWorkspace({
                       </Button>
                     </div>
                   ) : null}
+                  <Button variant="outline" className="justify-start" type="button" disabled={replayIndex !== null} onClick={toggleObjectLock}>
+                    <ShieldCheck className="h-4 w-4" />
+                    {selectedObject.lockedBy ? "Unlock object" : "Lock object"}
+                  </Button>
                 </div>
               ) : (
                 <div className="mt-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">

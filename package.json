@@ -13,6 +13,7 @@
     "build": "npm run build -w packages/shared && npm run build -w apps/sync && npm run build -w apps/web",
     "docs:images": "node docs/scripts/generate-doc-images.mjs",
     "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/sync && npm run typecheck -w apps/web",
+    "test": "tsx --test tests/*.test.ts",
     "lint": "npm run lint -w apps/web"
   },
   "devDependencies": {

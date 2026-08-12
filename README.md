@@ -14,7 +14,7 @@ iCanvas is a self-hosted collaborative infinite canvas for hackathon-speed visua
 - Draw, note, rectangle, ellipse, select, move, and delete tools
 - Notion-style dashboard with recent boards
 - Shareable board routes at `/boards/:boardId`
-- Secret access-key share links for newly created boards
+- Account-backed boards with owner, editor, and viewer roles
 - Editable board titles stored in the collaborative Yjs document
 - Inline sticky-note editing
 - shadcn-style UI primitives with Tailwind CSS
@@ -44,9 +44,7 @@ Then open:
 - Web app: http://localhost:3001
 - Sync health: http://localhost:1234/health
 
-Open the web app in two browser tabs, create or open a board, then use Share to copy the board URL. To test offline behavior, stop the sync server, keep editing in the browser, then restart it and open another tab.
-
-New boards include a secret `?key=...` in their share URL. Keep that URL when sharing or reopening the board; it scopes the synced document and local offline cache.
+Open the web app in two browser tabs, register an account, create a board, and use **Board access** to invite a second registered account as an editor or viewer. Copying a board URL is convenient, but never grants access on its own.
 
 ## Environment
 
@@ -57,6 +55,9 @@ NEXT_PUBLIC_SYNC_URL=ws://localhost:1234
 NEXT_PUBLIC_SYNC_HTTP_URL=http://localhost:1234
 SYNC_PORT=1234
 SYNC_DATA_DIR=./data
+SYNC_AUTH_SECRET=replace-with-a-long-random-secret
+SYNC_ALLOWED_ORIGINS=https://canvas.example.com
+SYNC_METRICS_KEY=replace-with-a-second-random-secret
 ```
 
 ## Production Shape
@@ -68,7 +69,9 @@ For production:
 - Put the web app behind HTTPS.
 - Expose the sync server as WSS.
 - Mount `apps/sync/data` or another durable volume.
-- Add authentication in `apps/sync/src/server.ts` using Hocuspocus `onAuthenticate`.
+- Set a unique `SYNC_AUTH_SECRET`; the development fallback must never be used publicly.
+- Set `SYNC_ALLOWED_ORIGINS` to the exact web origin.
+- Protect `/metrics` with `SYNC_METRICS_KEY` and back up `SYNC_BACKUP_DIR`.
 
 ## Hackathon Demo Script
 
@@ -83,7 +86,7 @@ For production:
 
 ## Next Product Steps
 
-- Add inline rich text blocks for sticky notes
-- Add production-grade account auth and board permissions
-- Add export crop controls
+- Add activity audit trails and password-reset/email-verification flows
+- Add image/file attachments to rich-text notes
+- Add multi-object crop/selection export
 - Add physics presets and per-board physics boundaries

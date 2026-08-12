@@ -28,7 +28,7 @@ Current capabilities:
 
 - Create a board from the dashboard.
 - Open a board at `/boards/:boardId`.
-- Share a board link with a secret access key for newly created boards.
+- Create account-backed boards with owner, editor, and viewer roles.
 - Draw freehand strokes.
 - Add sticky notes.
 - Add rectangles and ellipses.
@@ -102,13 +102,9 @@ Each board has a URL:
 /boards/:boardId
 ```
 
-Newly created boards also include a secret access key:
-
-```txt
-/boards/:boardId?key=:secret
-```
-
-That key scopes the synced document and local offline cache. It is lightweight share-link protection, not a full authentication system. The public demo board intentionally remains available without a key.
+The URL identifies a board but is not a credential. Users must sign in, and the server only authorizes
+owners, invited editors, and invited viewers. Board owners use **Board access** to invite an existing
+iCanvas account by email. Viewers can follow changes but Hocuspocus marks their connection read-only.
 
 ### 2. Seed The Demo Board
 
@@ -160,7 +156,13 @@ This is useful for:
 - Adding the board to a project brief.
 - Showing a quick artifact in a hackathon submission.
 
-### 8. Physics Mode
+### 8. Rich Notes, Exports, And Physics
+
+Double-click a sticky note to edit it inline. The compact editor supports bold, italic, and underline
+formatting; iCanvas sanitizes the stored markup and renders a plain-text fallback in Pixi and PNG exports.
+
+Use **Export selected PNG** for a tight single-object crop, or export the complete board when you need
+the wider context.
 
 Select a note, rectangle, or ellipse and choose **Enable physics** in the Style panel. Turn on
 **Physics mode** in the Session panel, then drag and release the object to toss it. Physics-enabled
@@ -183,18 +185,17 @@ That combination is strong because it is both practical and technically interest
 
 ## Current Limitations
 
-- No account system yet.
-- No board permissions yet.
-- Sticky notes are plain text, not rich text.
-- Access-key links are lightweight protection, not account-based permissions.
-- PNG export captures the full board, but does not yet offer crop controls.
+- Password reset and email verification are not implemented yet.
+- Invitations require the recipient to have already registered an account.
+- Object locks are a collaboration control; server-enforced permissions are board-level owner/editor/viewer roles.
+- PNG export supports a full board or one selected object, not an arbitrary multi-object crop.
 - Physics mode is intentionally scoped to notes and shapes. Strokes remain static so drawing stays
   predictable.
 
 ## Recommended Next Product Steps
 
-1. Add production authentication for the web and Hocuspocus server.
-2. Add crop controls for PNG export.
-3. Add rich-text sticky notes.
-4. Add object-level permissions.
+1. Add password reset, email verification, and audit history.
+2. Add arbitrary/multi-object crop controls for PNG export.
+3. Add rich-text attachments and collaborative text cursors.
+4. Add per-object server-side policy if the product needs it beyond board ACLs.
 5. Add physics presets and world boundaries after the demo loop is fully hardened.
