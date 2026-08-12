@@ -39,18 +39,19 @@ The original prompt asked for an ambitious solo, self-hosted collaborative infin
 | Resize handles | Complete | Notes and shapes can be resized from a handle. |
 | Replay playback | Complete | Replay can be scrubbed or played. |
 | Full-board PNG export | Complete | Export renders the full board content. |
-| Physics mode | Deferred | This was an explicit safe cut line in the original plan. |
+| Physics mode | Complete | Matter.js toss/collision, client ownership handoff, and gravity wells. |
 
 ## Readiness Call
 
-The core plan is accomplished. The only original feature not implemented is physics, and that was intentionally positioned as optional after the core collaboration/offline/replay path.
+The original core plan and its optional physics stretch are accomplished. Physics remains deliberately
+scoped so it cannot compromise the collaboration, offline, or replay demo path.
 
 For winning odds, the current priority should be:
 
 1. Browser QA with two tabs.
 2. Deployment.
 3. Rehearsed demo.
-4. Only then add physics if time remains.
+4. Rehearse the physics toss and gravity-well moment only after the core demo is stable.
 
 ## 90-Second Demo Script
 
@@ -104,7 +105,7 @@ The offline plus replay combination is the most important demo moment. It proves
 
 If time is short:
 
-1. Do not add physics.
+1. Do not expand physics beyond the existing toss/collision/gravity well.
 2. Do not add rich text.
 3. Do not add accounts.
 4. Do not add crop controls.
@@ -131,4 +132,4 @@ The main risks before judging are operational, not architectural:
 2. Configure WSS for the sync endpoint.
 3. Add production-grade account auth and board permissions.
 4. Add export crop controls.
-5. Add Matter.js physics as a final wow feature if everything else is stable.
+5. Add physics presets and boundaries only if the core demo is fully stable.

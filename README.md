@@ -24,6 +24,7 @@ iCanvas is a self-hosted collaborative infinite canvas for hackathon-speed visua
 - Presence radar/minimap with collaborator viewport rectangles
 - Visible offline/reconnect banner
 - Full-board PNG export
+- Matter.js physics mode: toss enabled notes/shapes, collision, and gravity wells
 - Replay scrubber with play/pause
 - Real-time Yjs collaboration over a self-hosted Hocuspocus server
 - Offline browser persistence with IndexedDB
@@ -85,4 +86,4 @@ For production:
 - Add inline rich text blocks for sticky notes
 - Add production-grade account auth and board permissions
 - Add export crop controls
-- Add a physics mode for toss/collision after the core collaboration remains stable
+- Add physics presets and per-board physics boundaries

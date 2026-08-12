@@ -127,10 +127,10 @@ const coverage = `
 
   ${card(90, 580, 360, 155, "Polish/product shell", ["Status: complete", "Dashboard", "Share links", "Notion-style UI"], theme.green)}
   ${card(520, 580, 360, 155, "Self-hosting", ["Status: complete", "Docker Compose", "Filesystem persistence"], theme.green)}
-  ${card(950, 580, 360, 155, "Physics mode", ["Status: optional", "Intentionally deferred", "Add after demo hardening"], theme.amber)}
+  ${card(950, 580, 360, 155, "Physics mode", ["Status: complete", "Matter.js ownership", "Toss, collision, gravity wells"], theme.violet)}
 
   ${text(90, 810, "Readiness call", 24)}
-  ${text(90, 848, "The core path is accomplished. Physics is the only original item not implemented, and it was explicitly the first safe cut line.", 19, theme.ink, 600)}
+  ${text(90, 848, "The full original scope is accomplished: collaboration, offline merge, replay, and a scoped physics wow moment.", 19, theme.ink, 600)}
 </svg>`;
 
 await renderPng("architecture.png", architecture);

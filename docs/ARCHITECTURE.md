@@ -40,6 +40,7 @@ It is responsible for:
 - Persisting the Yjs document locally with IndexedDB.
 - Rendering remote cursor awareness.
 - Reconstructing replay state from logged Yjs updates.
+- Running Matter.js only for locally owned physics objects.
 
 ## Canvas Rendering
 
@@ -92,6 +93,7 @@ Canvas object types:
 - `stroke`
 - `note`
 - `shape`
+- `gravity-well`
 
 Board metadata:
 
@@ -186,6 +188,18 @@ The frontend:
 5. Can autoplay through updates with play/pause controls.
 
 This avoids building a separate history model.
+
+## Physics Ownership
+
+Matter.js is a local simulation, not a second source of collaborative state. When a user grabs a
+physics-enabled note or shape, iCanvas records that browser's Yjs client ID as `physics.ownerId`.
+Only that client simulates the object and publishes its position and velocity to Yjs at roughly
+18Hz; peers render those shared positions and never run a competing simulation. Ownership clears
+when the object settles. This prevents the position fighting and teleporting that independent
+per-client simulations cause.
+
+Gravity wells are ordinary shared canvas objects. A positive well attracts and a negative well
+repels locally owned moving bodies, so their settings also replay and synchronize normally.
 
 ## Presence And Radar
 

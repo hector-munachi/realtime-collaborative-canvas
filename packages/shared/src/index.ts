@@ -1,4 +1,4 @@
-export type CanvasTool = "select" | "draw" | "note" | "rect" | "ellipse";
+export type CanvasTool = "select" | "draw" | "note" | "rect" | "ellipse" | "gravity";
 
 export type Point = {
   x: number;
@@ -11,10 +11,23 @@ export type Camera = {
   zoom: number;
 };
 
+/**
+ * Physics is deliberately part of the shared object contract. The client that
+ * last grabs an object becomes its short-lived authority; everyone else only
+ * renders the positions it publishes through Yjs.
+ */
+export type PhysicsState = {
+  enabled: boolean;
+  ownerId?: string;
+  velocity?: Point;
+  active?: boolean;
+};
+
 export type BaseCanvasObject = {
   id: string;
   createdBy: string;
   updatedAt: number;
+  physics?: PhysicsState;
 };
 
 export type StrokeObject = BaseCanvasObject & {
@@ -45,7 +58,16 @@ export type ShapeObject = BaseCanvasObject & {
   stroke: string;
 };
 
-export type CanvasObject = StrokeObject | NoteObject | ShapeObject;
+export type GravityWellObject = BaseCanvasObject & {
+  type: "gravity-well";
+  x: number;
+  y: number;
+  radius: number;
+  /** Positive attracts; negative repels. */
+  strength: number;
+};
+
+export type CanvasObject = StrokeObject | NoteObject | ShapeObject | GravityWellObject;
 
 export type AwarenessState = {
   user?: {

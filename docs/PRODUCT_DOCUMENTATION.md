@@ -43,6 +43,8 @@ Current capabilities:
 - Replay the board's edit history with scrub or play/pause controls.
 - Reset the demo board for rehearsals.
 - Export the full board as PNG.
+- Enable physics on notes or shapes, then toss them into each other.
+- Add an attract or repel gravity well for a lightweight physics interaction.
 - Run the whole system locally or self-host it with Docker Compose.
 
 ## How To Run It
@@ -158,6 +160,16 @@ This is useful for:
 - Adding the board to a project brief.
 - Showing a quick artifact in a hackathon submission.
 
+### 8. Physics Mode
+
+Select a note, rectangle, or ellipse and choose **Enable physics** in the Style panel. Turn on
+**Physics mode** in the Session panel, then drag and release the object to toss it. Physics-enabled
+objects collide while the active client owns their simulation.
+
+Choose the gravity-well tool in the toolbar to place an attractor. Select a well to switch it from
+attract to repel. The well affects nearby, physics-enabled objects while their owner is simulating
+them.
+
 ## The Product Story
 
 iCanvas is intentionally not trying to be a complete Miro clone. The winning wedge is narrower:
@@ -176,7 +188,8 @@ That combination is strong because it is both practical and technically interest
 - Sticky notes are plain text, not rich text.
 - Access-key links are lightweight protection, not account-based permissions.
 - PNG export captures the full board, but does not yet offer crop controls.
-- Physics mode from the original stretch plan is intentionally deferred.
+- Physics mode is intentionally scoped to notes and shapes. Strokes remain static so drawing stays
+  predictable.
 
 ## Recommended Next Product Steps
 
@@ -184,4 +197,4 @@ That combination is strong because it is both practical and technically interest
 2. Add crop controls for PNG export.
 3. Add rich-text sticky notes.
 4. Add object-level permissions.
-5. Add optional physics mode after the demo loop is fully hardened.
+5. Add physics presets and world boundaries after the demo loop is fully hardened.

@@ -6,6 +6,7 @@ import {
   Download,
   Circle,
   Clipboard,
+  Crosshair,
   Edit3,
   Home,
   MousePointer2,
@@ -26,6 +27,7 @@ import {
   WifiOff
 } from "lucide-react";
 import { Application, Container, Graphics, Text } from "pixi.js";
+import Matter, { type Body, type Engine } from "matter-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import {
@@ -38,6 +40,7 @@ import {
   type Camera,
   type CanvasObject,
   type CanvasTool,
+  type PhysicsState,
   type Point,
   type ReplayUpdate
 } from "@icanvas/shared";
@@ -62,6 +65,9 @@ type DragState =
       mode: "move";
       objectId: string;
       start: Point;
+      last: Point;
+      lastAt: number;
+      velocity: Point;
       original: CanvasObject;
     }
   | {
@@ -90,7 +96,8 @@ const TOOL_CONFIG: Array<{
   { tool: "draw", label: "Draw", icon: Pencil },
   { tool: "note", label: "Sticky note", icon: StickyNote },
   { tool: "rect", label: "Rectangle", icon: RectangleHorizontal },
-  { tool: "ellipse", label: "Ellipse", icon: Circle }
+  { tool: "ellipse", label: "Ellipse", icon: Circle },
+  { tool: "gravity", label: "Add gravity well", icon: Crosshair }
 ];
 
 const STROKE_COLORS = ["#1f1f1f", "#0f766e", "#2563eb", "#b45309", "#be123c", "#7c3aed"];
@@ -101,6 +108,12 @@ const CANVAS_BACKGROUND = "#fbfbfa";
 const CANVAS_GRID = "#e3e2df";
 const CANVAS_GRID_HEX = 0xdbe3eb;
 const CANVAS_SELECTION_HEX = 0x111827;
+const PHYSICS_PUBLISH_INTERVAL = 1000 / 18;
+const PHYSICS_SETTLE_SPEED = 0.045;
+
+function isPhysicalObject(object: CanvasObject): object is Extract<CanvasObject, { type: "note" | "shape" }> {
+  return object.type === "note" || object.type === "shape";
+}
 
 function screenToWorld(point: Point, camera: Camera): Point {
   return {
@@ -138,6 +151,10 @@ function distanceToSegment(point: Point, start: Point, end: Point): number {
 }
 
 function hitTestObject(object: CanvasObject, point: Point): boolean {
+  if (object.type === "gravity-well") {
+    return Math.hypot(point.x - object.x, point.y - object.y) <= object.radius;
+  }
+
   if (object.type === "note" || object.type === "shape") {
     return (
       point.x >= object.x &&
@@ -205,6 +222,15 @@ function objectBounds(object: CanvasObject) {
       minY: Math.min(...ys),
       maxX: Math.max(...xs),
       maxY: Math.max(...ys)
+    };
+  }
+
+  if (object.type === "gravity-well") {
+    return {
+      minX: object.x - object.radius,
+      minY: object.y - object.radius,
+      maxX: object.x + object.radius,
+      maxY: object.y + object.radius
     };
   }
 
@@ -373,6 +399,19 @@ function exportObjectsToPng(objects: CanvasObject[], title: string) {
       continue;
     }
 
+    if (object.type === "gravity-well") {
+      const center = toCanvas({ x: object.x, y: object.y });
+      context.beginPath();
+      context.arc(center.x, center.y, object.radius * scale, 0, Math.PI * 2);
+      context.fillStyle = object.strength >= 0 ? "rgba(124, 58, 237, 0.14)" : "rgba(190, 24, 93, 0.14)";
+      context.strokeStyle = object.strength >= 0 ? "#7c3aed" : "#be123c";
+      context.setLineDash([6 * scale, 5 * scale]);
+      context.fill();
+      context.stroke();
+      context.setLineDash([]);
+      continue;
+    }
+
     const topLeft = toCanvas({ x: object.x, y: object.y });
     const width = object.width * scale;
     const height = object.height * scale;
@@ -471,6 +510,7 @@ function createDemoObjects(user: LocalUser): CanvasObject[] {
       height: 92,
       fill: "#f1f1ef",
       stroke: "#787774",
+      physics: { enabled: true, active: false },
       createdBy: author,
       updatedAt: now + 3
     },
@@ -484,6 +524,7 @@ function createDemoObjects(user: LocalUser): CanvasObject[] {
       height: 110,
       fill: "#f4dfeb",
       stroke: "#be123c",
+      physics: { enabled: true, active: false },
       createdBy: author,
       updatedAt: now + 4
     },
@@ -541,6 +582,20 @@ function drawObjects(
 
   for (const object of objects) {
     const graphic = new Graphics();
+
+    if (object.type === "gravity-well") {
+      const color = object.strength >= 0 ? 0x7c3aed : 0xbe123c;
+      graphic.circle(object.x, object.y, object.radius);
+      graphic.fill({ color, alpha: 0.1 });
+      graphic.stroke({
+        color: selectedId === object.id ? CANVAS_SELECTION_HEX : color,
+        width: selectedId === object.id ? 3 : 2
+      });
+      graphic.circle(object.x, object.y, 7);
+      graphic.fill({ color, alpha: 0.85 });
+      stage.addChild(graphic);
+      continue;
+    }
 
     if (object.type === "stroke") {
       if (object.points.length > 0) {
@@ -626,6 +681,11 @@ export function CanvasWorkspace({
   const objectsRef = useRef<CanvasObject[]>([]);
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const localUserRef = useRef<LocalUser | null>(null);
+  const physicsOwnerRef = useRef<string | null>(null);
+  const physicsEngineRef = useRef<Engine | null>(null);
+  const physicsBodiesRef = useRef<Map<string, Body>>(new Map());
+  const physicsPublishAtRef = useRef<Map<string, number>>(new Map());
+  const physicsFrameRef = useRef<number | null>(null);
 
   const [tool, setTool] = useState<CanvasTool>("select");
   const [objects, setObjects] = useState<CanvasObject[]>([]);
@@ -656,6 +716,7 @@ export function CanvasWorkspace({
     return "";
   });
   const [replayPlaying, setReplayPlaying] = useState(false);
+  const [physicsMode, setPhysicsMode] = useState(false);
 
   const fallbackBoardTitle = useMemo(() => boardTitleFromId(boardId), [boardId]);
   const boardTitle = boardMeta.title?.trim() || fallbackBoardTitle;
@@ -697,7 +758,7 @@ export function CanvasWorkspace({
   }, [camera, editingNote, objects]);
 
   const selectedBoxPosition = useMemo(() => {
-    if (!selectedObject || selectedObject.type === "stroke" || editingNote) {
+    if (!selectedObject || selectedObject.type === "stroke" || selectedObject.type === "gravity-well" || editingNote) {
       return null;
     }
 
@@ -811,6 +872,7 @@ export function CanvasWorkspace({
     const objectsMap = ydoc.getMap<CanvasObject>(BOARD_OBJECTS_KEY);
     const metaMap = ydoc.getMap<BoardMetadata[keyof BoardMetadata]>(BOARD_META_KEY);
     ydocRef.current = ydoc;
+    physicsOwnerRef.current = String(ydoc.clientID);
     objectsMapRef.current = objectsMap;
     metaMapRef.current = metaMap;
 
@@ -887,6 +949,7 @@ export function CanvasWorkspace({
       awareness.off("change", updateAwareness);
       provider.destroy();
       void indexedDbProvider?.destroy();
+      physicsOwnerRef.current = null;
       ydoc.destroy();
     };
   }, [documentName]);
@@ -981,6 +1044,199 @@ export function CanvasWorkspace({
   const upsertObject = useCallback((object: CanvasObject) => {
     objectsMapRef.current?.set(object.id, object);
   }, []);
+
+  useEffect(() => {
+    if (!physicsMode || replayIndex !== null) {
+      return;
+    }
+
+    const user = localUserRef.current;
+    const ownerId = physicsOwnerRef.current;
+
+    if (!user || !ownerId) {
+      return;
+    }
+
+    const engine = Matter.Engine.create({
+      gravity: { x: 0, y: 0, scale: 0 }
+    });
+    physicsEngineRef.current = engine;
+    let previousTick = performance.now();
+
+    const tick = (now: number) => {
+      const activeObjects = objectsRef.current.filter(
+        (object): object is Extract<CanvasObject, { type: "note" | "shape" }> =>
+          isPhysicalObject(object) && object.physics?.enabled === true && object.physics.ownerId === ownerId
+      );
+      const activeIds = new Set(activeObjects.map((object) => object.id));
+
+      for (const [id, body] of physicsBodiesRef.current) {
+        if (!activeIds.has(id)) {
+          Matter.World.remove(engine.world, body);
+          physicsBodiesRef.current.delete(id);
+          physicsPublishAtRef.current.delete(id);
+        }
+      }
+
+      for (const object of activeObjects) {
+        const center = {
+          x: object.x + object.width / 2,
+          y: object.y + object.height / 2
+        };
+        let body = physicsBodiesRef.current.get(object.id);
+
+        if (!body) {
+          body = Matter.Bodies.rectangle(center.x, center.y, object.width, object.height, {
+            frictionAir: 0.028,
+            friction: 0.08,
+            restitution: 0.72,
+            inertia: Infinity
+          });
+          physicsBodiesRef.current.set(object.id, body);
+          Matter.World.add(engine.world, body);
+          if (object.physics?.velocity) {
+            Matter.Body.setVelocity(body, object.physics.velocity);
+          }
+        }
+
+        if (dragRef.current?.mode === "move" && dragRef.current.objectId === object.id) {
+          continue;
+        }
+
+        for (const well of objectsRef.current) {
+          if (well.type !== "gravity-well") {
+            continue;
+          }
+
+          const dx = well.x - body.position.x;
+          const dy = well.y - body.position.y;
+          const distance = Math.hypot(dx, dy);
+
+          if (distance < 12 || distance > well.radius) {
+            continue;
+          }
+
+          const falloff = (1 - distance / well.radius) ** 2;
+          const force = 0.0022 * well.strength * falloff;
+          Matter.Body.applyForce(body, body.position, {
+            x: (dx / distance) * force,
+            y: (dy / distance) * force
+          });
+        }
+      }
+
+      Matter.Engine.update(engine, Math.min(33, Math.max(8, now - previousTick)));
+      previousTick = now;
+
+      for (const [id, body] of physicsBodiesRef.current) {
+        const object = objectsMapRef.current?.get(id);
+
+        if (!object || !isPhysicalObject(object) || object.physics?.ownerId !== ownerId) {
+          continue;
+        }
+
+        if (dragRef.current?.mode === "move" && dragRef.current.objectId === id) {
+          continue;
+        }
+
+        const speed = Math.hypot(body.velocity.x, body.velocity.y);
+        const settled = speed < PHYSICS_SETTLE_SPEED;
+        const lastPublishAt = physicsPublishAtRef.current.get(id) ?? 0;
+
+        if (!settled && now - lastPublishAt < PHYSICS_PUBLISH_INTERVAL) {
+          continue;
+        }
+
+        physicsPublishAtRef.current.set(id, now);
+        const physics: PhysicsState = settled
+          ? { enabled: true, active: false }
+          : {
+              enabled: true,
+              ownerId,
+              active: true,
+              velocity: { x: body.velocity.x, y: body.velocity.y }
+            };
+
+        upsertObject({
+          ...object,
+          x: body.position.x - object.width / 2,
+          y: body.position.y - object.height / 2,
+          physics,
+          updatedAt: Date.now()
+        });
+
+        if (settled) {
+          Matter.Body.setVelocity(body, { x: 0, y: 0 });
+          Matter.World.remove(engine.world, body);
+          physicsBodiesRef.current.delete(id);
+          physicsPublishAtRef.current.delete(id);
+        }
+      }
+
+      physicsFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    physicsFrameRef.current = window.requestAnimationFrame(tick);
+
+    return () => {
+      if (physicsFrameRef.current !== null) {
+        window.cancelAnimationFrame(physicsFrameRef.current);
+      }
+      physicsFrameRef.current = null;
+
+      for (const [id, body] of physicsBodiesRef.current) {
+        const object = objectsMapRef.current?.get(id);
+
+        if (object && isPhysicalObject(object) && object.physics?.ownerId === ownerId) {
+          upsertObject({
+            ...object,
+            x: body.position.x - object.width / 2,
+            y: body.position.y - object.height / 2,
+            physics: { enabled: true, active: false },
+            updatedAt: Date.now()
+          });
+        }
+      }
+
+      Matter.World.clear(engine.world, false);
+      Matter.Engine.clear(engine);
+      physicsBodiesRef.current.clear();
+      physicsPublishAtRef.current.clear();
+      physicsEngineRef.current = null;
+    };
+  }, [physicsMode, replayIndex, upsertObject]);
+
+  const toggleSelectedPhysics = useCallback(() => {
+    if (!selectedId) {
+      return;
+    }
+
+    const object = objectsMapRef.current?.get(selectedId);
+
+    if (!object || !isPhysicalObject(object)) {
+      return;
+    }
+
+    upsertObject({
+      ...object,
+      physics: object.physics?.enabled ? undefined : { enabled: true, active: false },
+      updatedAt: Date.now()
+    });
+  }, [selectedId, upsertObject]);
+
+  const toggleGravityPolarity = useCallback(() => {
+    if (!selectedId) {
+      return;
+    }
+
+    const object = objectsMapRef.current?.get(selectedId);
+
+    if (object?.type !== "gravity-well") {
+      return;
+    }
+
+    upsertObject({ ...object, strength: -object.strength, updatedAt: Date.now() });
+  }, [selectedId, upsertObject]);
 
   const deleteSelected = useCallback(() => {
     if (!selectedId) {
@@ -1227,6 +1483,23 @@ export function CanvasWorkspace({
         return;
       }
 
+      if (tool === "gravity") {
+        const object: CanvasObject = {
+          id: createId("gravity"),
+          type: "gravity-well",
+          x: world.x,
+          y: world.y,
+          radius: 240,
+          strength: 1,
+          createdBy: user.id,
+          updatedAt: Date.now()
+        };
+        upsertObject(object);
+        setSelectedId(object.id);
+        setTool("select");
+        return;
+      }
+
       if (tool === "rect" || tool === "ellipse") {
         const object: CanvasObject = {
           id: createId("shape"),
@@ -1250,13 +1523,36 @@ export function CanvasWorkspace({
       const hitObject = findObjectAt(objectsRef.current, world);
 
       if (hitObject) {
+        const ownerId = physicsOwnerRef.current;
+        const isPhysicsGrab =
+          physicsMode && isPhysicalObject(hitObject) && hitObject.physics?.enabled === true && Boolean(ownerId);
+        const movingObject = isPhysicsGrab
+          ? {
+              ...hitObject,
+              physics: {
+                enabled: true,
+                ownerId: ownerId as string,
+                active: true,
+                velocity: { x: 0, y: 0 }
+              },
+              updatedAt: Date.now()
+            }
+          : hitObject;
+
+        if (isPhysicsGrab) {
+          upsertObject(movingObject);
+        }
+
         setSelectedId(hitObject.id);
         setEditingNote(null);
         dragRef.current = {
           mode: "move",
           objectId: hitObject.id,
           start: world,
-          original: hitObject
+          last: world,
+          lastAt: performance.now(),
+          velocity: { x: 0, y: 0 },
+          original: movingObject
         };
         return;
       }
@@ -1269,7 +1565,7 @@ export function CanvasWorkspace({
         startCamera: cameraRef.current
       };
     },
-    [getPointerPosition, replayIndex, tool, upsertObject]
+    [getPointerPosition, physicsMode, replayIndex, tool, upsertObject]
   );
 
   const handlePointerMove = useCallback(
@@ -1318,7 +1614,27 @@ export function CanvasWorkspace({
       }
 
       if (drag.mode === "move") {
-        upsertObject(translateObject(drag.original, world.x - drag.start.x, world.y - drag.start.y));
+        const moved = translateObject(drag.original, world.x - drag.start.x, world.y - drag.start.y);
+        const elapsed = Math.max(1, performance.now() - drag.lastAt);
+        drag.velocity = {
+          x: (world.x - drag.last.x) * (16 / elapsed),
+          y: (world.y - drag.last.y) * (16 / elapsed)
+        };
+        drag.last = world;
+        drag.lastAt = performance.now();
+        upsertObject(moved);
+
+        if (isPhysicalObject(moved) && moved.physics?.ownerId === physicsOwnerRef.current) {
+          const body = physicsBodiesRef.current.get(moved.id);
+
+          if (body) {
+            Matter.Body.setPosition(body, {
+              x: moved.x + moved.width / 2,
+              y: moved.y + moved.height / 2
+            });
+            Matter.Body.setVelocity(body, { x: 0, y: 0 });
+          }
+        }
       }
 
       if (drag.mode === "resize") {
@@ -1345,10 +1661,35 @@ export function CanvasWorkspace({
     [getPointerPosition, replayIndex, upsertObject]
   );
 
-  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    dragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }, []);
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+
+      if (drag?.mode === "move") {
+        const object = objectsMapRef.current?.get(drag.objectId);
+        const ownerId = physicsOwnerRef.current;
+
+        if (object && ownerId && isPhysicalObject(object) && object.physics?.ownerId === ownerId) {
+          const velocity = drag.velocity;
+          const body = physicsBodiesRef.current.get(object.id);
+
+          if (body) {
+            Matter.Body.setVelocity(body, velocity);
+          }
+
+          upsertObject({
+            ...object,
+            physics: { enabled: true, ownerId, active: true, velocity },
+            updatedAt: Date.now()
+          });
+        }
+      }
+
+      dragRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    },
+    [upsertObject]
+  );
 
   const handleDoubleClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1748,6 +2089,21 @@ export function CanvasWorkspace({
                     );
                   }
 
+                  if (object.type === "gravity-well") {
+                    const center = minimap.toMini({ x: object.x, y: object.y });
+
+                    return (
+                      <circle
+                        key={object.id}
+                        cx={center.x}
+                        cy={center.y}
+                        r={Math.max(3, object.radius * minimap.scale)}
+                        fill={object.strength >= 0 ? "rgba(124, 58, 237, 0.15)" : "rgba(190, 24, 93, 0.15)"}
+                        stroke={object.strength >= 0 ? "#7c3aed" : "#be123c"}
+                      />
+                    );
+                  }
+
                   const topLeft = minimap.toMini({ x: object.x, y: object.y });
                   const width = object.width * minimap.scale;
                   const height = object.height * minimap.scale;
@@ -1899,6 +2255,16 @@ export function CanvasWorkspace({
                   {boardMeta.seededDemoAt ? "Reset demo board" : "Seed demo board"}
                 </Button>
                 <Button
+                  variant={physicsMode ? "default" : "outline"}
+                  className="justify-start"
+                  type="button"
+                  disabled={replayIndex !== null}
+                  onClick={() => setPhysicsMode((current) => !current)}
+                >
+                  <Crosshair className="h-4 w-4" />
+                  {physicsMode ? "Physics mode on" : "Physics mode"}
+                </Button>
+                <Button
                   variant="outline"
                   className="justify-start"
                   type="button"
@@ -1949,7 +2315,24 @@ export function CanvasWorkspace({
                 <Palette className="h-3.5 w-3.5" />
                 Style
               </h2>
-              {selectedObject ? (
+              {selectedObject?.type === "gravity-well" ? (
+                <div className="mt-3 grid gap-3">
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {selectedObject.strength >= 0 ? "Attracting" : "Repelling"} physics objects within
+                    {` ${selectedObject.radius}px`}.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="justify-start"
+                    type="button"
+                    disabled={replayIndex !== null}
+                    onClick={toggleGravityPolarity}
+                  >
+                    <Crosshair className="h-4 w-4" />
+                    Switch to {selectedObject.strength >= 0 ? "repel" : "attract"}
+                  </Button>
+                </div>
+              ) : selectedObject ? (
                 <div className="mt-3 grid gap-4">
                   <div>
                     <p className="mb-2 text-xs text-muted-foreground">Color</p>
@@ -2010,6 +2393,26 @@ export function CanvasWorkspace({
                       <StickyNote className="h-4 w-4" />
                       Edit note
                     </Button>
+                  ) : null}
+
+                  {isPhysicalObject(selectedObject) ? (
+                    <div className="grid gap-2 border-t pt-4">
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        {selectedObject.physics?.enabled
+                          ? "Physics enabled: turn on Physics mode, then drag and release to toss."
+                          : "Enable physics to make this object toss, collide, and react to gravity wells."}
+                      </p>
+                      <Button
+                        variant="outline"
+                        className="justify-start"
+                        type="button"
+                        disabled={replayIndex !== null}
+                        onClick={toggleSelectedPhysics}
+                      >
+                        <Crosshair className="h-4 w-4" />
+                        {selectedObject.physics?.enabled ? "Disable physics" : "Enable physics"}
+                      </Button>
+                    </div>
                   ) : null}
                 </div>
               ) : (
