@@ -97,6 +97,11 @@ const STROKE_COLORS = ["#1f1f1f", "#0f766e", "#2563eb", "#b45309", "#be123c", "#
 const NOTE_COLORS = ["#fbf3db", "#fdecc8", "#e9f5db", "#ddedea", "#e7f0fd", "#f4dfeb"];
 const SHAPE_COLORS = ["#f1f1ef", "#ddedea", "#e7f0fd", "#fdecc8", "#f4dfeb", "#ede7f6"];
 
+const CANVAS_BACKGROUND = "#fbfbfa";
+const CANVAS_GRID = "#e3e2df";
+const CANVAS_GRID_HEX = 0xdbe3eb;
+const CANVAS_SELECTION_HEX = 0x111827;
+
 function screenToWorld(point: Point, camera: Camera): Point {
   return {
     x: (point.x - camera.x) / camera.zoom,
@@ -316,10 +321,10 @@ function exportObjectsToPng(objects: CanvasObject[], title: string) {
     y: (point.y - bounds.minY + padding) * scale
   });
 
-  context.fillStyle = "#fbfbfa";
+  context.fillStyle = CANVAS_BACKGROUND;
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  context.strokeStyle = "#e3e2df";
+  context.strokeStyle = CANVAS_GRID;
   context.lineWidth = 1;
   const gridSize = 80;
   const startX = Math.floor(bounds.minX / gridSize) * gridSize;
@@ -531,7 +536,7 @@ function drawObjects(
     grid.lineTo(gridExtent, y);
   }
 
-  grid.stroke({ color: 0xdbe3eb, width: 1 });
+  grid.stroke({ color: CANVAS_GRID_HEX, width: 1 });
   stage.addChild(grid);
 
   for (const object of objects) {
@@ -558,7 +563,7 @@ function drawObjects(
       graphic.roundRect(object.x, object.y, object.width, object.height, 8);
       graphic.fill({ color: toHexNumber(object.color), alpha: 1 });
       graphic.stroke({
-        color: selectedId === object.id ? 0x111827 : 0xd69e2e,
+        color: selectedId === object.id ? CANVAS_SELECTION_HEX : 0xd69e2e,
         width: selectedId === object.id ? 3 : 1
       });
 
@@ -594,7 +599,7 @@ function drawObjects(
 
       graphic.fill({ color: toHexNumber(object.fill), alpha: 0.8 });
       graphic.stroke({
-        color: selectedId === object.id ? 0x111827 : toHexNumber(object.stroke),
+        color: selectedId === object.id ? CANVAS_SELECTION_HEX : toHexNumber(object.stroke),
         width: selectedId === object.id ? 3 : 2
       });
     }
@@ -1596,7 +1601,7 @@ export function CanvasWorkspace({
 
           {selectedNotePosition ? (
             <textarea
-              className="absolute z-20 resize-none rounded-md border bg-[#fbf3db] p-3 text-sm leading-6 text-foreground shadow-lg outline-none ring-2 ring-ring"
+              className="absolute z-20 resize-none rounded-md border border-[#d6c06d] bg-[#fbf3db] p-3 text-sm leading-6 text-[#1f1f1f] caret-[#1f1f1f] shadow-lg outline-none ring-2 ring-ring placeholder:text-[#787774]"
               style={{
                 left: selectedNotePosition.left,
                 top: selectedNotePosition.top,
@@ -1608,8 +1613,10 @@ export function CanvasWorkspace({
               onPointerDown={(event) => event.stopPropagation()}
               onDoubleClick={(event) => event.stopPropagation()}
               onChange={(event) => {
+                const nextText = event.currentTarget.value;
+
                 setEditingNote((current) =>
-                  current ? { ...current, text: event.currentTarget.value } : current
+                  current ? { ...current, text: nextText } : current
                 );
               }}
               onBlur={commitEditingNote}
