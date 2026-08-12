@@ -1,0 +1,22 @@
+{
+  "name": "icanvas",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n sync,web -c cyan,magenta \"npm run dev -w apps/sync\" \"npm run dev -w apps/web\"",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:sync": "npm run dev -w apps/sync",
+    "build": "npm run build -w packages/shared && npm run build -w apps/sync && npm run build -w apps/web",
+    "docs:images": "node docs/scripts/generate-doc-images.mjs",
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/sync && npm run typecheck -w apps/web",
+    "lint": "npm run lint -w apps/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "typescript": "^5.8.3"
+  }
+}

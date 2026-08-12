@@ -1,0 +1,27 @@
+services:
+  sync:
+    build:
+      context: .
+      dockerfile: apps/sync/Dockerfile
+    environment:
+      SYNC_PORT: 1234
+      SYNC_DATA_DIR: /app/data
+    ports:
+      - "1234:1234"
+    volumes:
+      - icanvas-sync-data:/app/data
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_SYNC_URL: ws://localhost:1234
+      NEXT_PUBLIC_SYNC_HTTP_URL: http://localhost:1234
+    ports:
+      - "3000:3000"
+    depends_on:
+      - sync
+
+volumes:
+  icanvas-sync-data:
